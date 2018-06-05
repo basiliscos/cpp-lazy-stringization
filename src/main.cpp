@@ -78,22 +78,22 @@ struct tag_char : tag_t<1> {
 };
 
 
-template <typename ... Types> struct SizeOf;
-template <typename TFirst> struct SizeOf<TFirst> { static const auto Value = sizeof(TFirst); };
-template <typename TFirst, typename ... TRemaining> struct SizeOf<TFirst, TRemaining ...> {
-    static const auto Value = (sizeof(TFirst) + SizeOf<TRemaining...>::Value);
+template <typename ...Ts> struct size_of_t;
+template <typename T> struct size_of_t<T> { static const auto Value = T::value; };
+template <typename T, typename ...Ts> struct size_of_t<T, Ts ...> {
+    static const auto Value = (size_of_t<T>::Value + size_of_t<Ts...>::Value);
 };
 
 template <typename ... Tags> struct Composer;
 template <typename T1> struct Composer<T1> {
-    static constexpr auto fn = [](char* in, datetime& dt) {
+    static char* fn(char* in, datetime& dt) {
         return T1::apply(in, dt);
-    };
+    }
 };
 template <typename T, typename ...Tags> struct Composer<T, Tags...> {
-    static constexpr auto fn = [](char* in, datetime& dt) {
+    static char* fn(char* in, datetime& dt) {
         return Composer<Tags...>::fn(Composer<T>::fn(in, dt), dt);
-    };
+    }
     static char* compose(char* in, datetime& dt) {
         return fn(in, dt);
     }
@@ -101,7 +101,7 @@ template <typename T, typename ...Tags> struct Composer<T, Tags...> {
 
 template <typename ...Args>
 struct expression_t {
-    static const auto N  = SizeOf<Args...>::Value;
+    static const auto N  = size_of_t<Args...>::Value;
     using FinalComposer = Composer<Args...>;
 
     inline static char* apply(char* in, datetime& dt) {
@@ -121,7 +121,6 @@ int main(int argc, char** argv) {
     char* buff_end = iso_t::apply(buff, now);
     auto sz = buff_end - buff;
     *buff_end = 0;
-    // return panda::string(buff, sz);
-    std::cout << "result " << sz << " bytes :: " << buff << "\n";
+    std::cout << "result " << sz << "/" << iso_t::N << " bytes :: " << buff << "\n";
     return 0;
 }
