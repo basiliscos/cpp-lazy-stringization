@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include "iso8601.hpp"
 
 char* itoa (int64_t i) {
     const int INT_DIGITS = 19; /* enough for 64 bit integer */
@@ -23,15 +24,6 @@ char* itoa (int64_t i) {
     }
     return p;
 }
-
-struct datetime {
-    uint32_t year;
-    uint32_t month;
-    uint32_t day;
-    uint32_t hour;
-    uint32_t min;
-    uint32_t sec;
-};
 
 template <std::size_t N>
 struct tag_t: std::integral_constant<std::size_t, N>{
@@ -115,6 +107,33 @@ using iso_t = expression_t<
 >;
 
 
+template <typename G>
+void parse(const char* sample, bool expected) {
+    datetime dt {0, 0, 0, 0, 0, 0};
+    parser::microsec_t mksec {0};
+    parser::timezone_t tz;
+    parser::context_t ctx {dt, mksec, tz, 0, 0, parser::time_unit_t::NONE };
+    const char* end = sample + strlen(sample);
+    const char* result = G::parse(sample, end, ctx);
+    bool r = (result == end);
+    if (r == expected) {
+        std::cout << "ok ";
+    } else {
+        std::cout << "[!] ";
+    }
+    if (!r) {
+        std::cout << "failed to parse '" << sample << "'\n";
+    } else {
+        std::cout << "sample '" << sample << "' parsed. "
+            << "y = " << dt.year << ", m = " << dt.month << ", d = " << dt.day
+            << "c.week = " << ctx.week << ", c.week_day= " << ctx.week_day
+            << ", h = " << dt.hour << ", min = " << dt.min << ", sec = " << dt.sec
+            << ", mksec = " << mksec
+            << "\n";
+    }
+}
+
+
 int main(int argc, char** argv) {
     char buff[iso_t::N] = {0};
     datetime now { 2018, 4, 6, 22, 42, 5};
@@ -122,5 +141,36 @@ int main(int argc, char** argv) {
     auto sz = buff_end - buff;
     *buff_end = 0;
     std::cout << "result " << sz << "/" << iso_t::N << " bytes :: " << buff << "\n";
+
+    parse<parser::grammar_date>("2018", true);
+    parse<parser::grammar_date>("20181231", true);
+    parse<parser::grammar_date>("2018-12", true);
+    parse<parser::grammar_date>("2018-12-31", true);
+    parse<parser::grammar_date>("201812", false);
+
+    parse<parser::grammar_date>("20181", false);
+    parse<parser::grammar_date>("201", false);
+    parse<parser::grammar_date>("2018-256", true);
+    parse<parser::grammar_date>("2018256", true);
+    parse<parser::grammar_date>("2018-xxx", false);
+    parse<parser::grammar_date>("2018W06", true);
+    parse<parser::grammar_date>("2018W061", true);
+    parse<parser::grammar_date>("2018-W06", true);
+    parse<parser::grammar_date>("2018-W06-1", true);
+
+    parse<parser::grammar_time>("12", true);
+    parse<parser::grammar_time>("1213", true);
+    parse<parser::grammar_time>("121314", true);
+    parse<parser::grammar_time>("12:13", true);
+    parse<parser::grammar_time>("12:13:14", true);
+    parse<parser::grammar_time>("12.5", true);
+    parse<parser::grammar_time>("12.30.5", false);
+    parse<parser::grammar_time>("1230.5", true);
+    parse<parser::grammar_time>("12:30.5", true);
+    parse<parser::grammar_time>("12:30:11.5", true);
+    parse<parser::grammar_time>("12:30:11.500000", true);
+    parse<parser::grammar_time>("12:30:11.555555", true);
+    parse<parser::grammar_time>("12:30:11.5x5555", false);
+    parse<parser::grammar_time>("12:30:11.5555555", false);
     return 0;
 }
