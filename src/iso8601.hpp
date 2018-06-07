@@ -356,4 +356,31 @@ using grammar = op_or<
     grammar_vCard
 >;
 
+using grammar_generic = op_seq<
+    term_year,
+    op_or<term_char<'-'>, term_char<'/'>>,
+    term_month,
+    op_or<term_char<'-'>, term_char<'/'>>,
+    term_day,                                                                       /// YYYY-MM-DD, YYYY/MM/DD
+    op_maybe<op_seq<
+        term_char<' '>,
+        term_hour,
+        term_char<':'>,
+        term_min,
+        term_char<':'>,
+        term_sec,                                                                   // HH:MM:SS
+        op_maybe<op_seq<
+            term_fraction,                                                          // .s{1,6}
+            op_maybe<op_seq<
+                op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,                        // ±HH:MM, ±HHMM, ±HH
+                grammar_tz_offset
+            >>
+        >>,
+        op_maybe<op_seq<
+            op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,                            // ±HH:MM, ±HHMM, ±HH
+            grammar_tz_offset
+        >>
+    >>
+>;
+
 }

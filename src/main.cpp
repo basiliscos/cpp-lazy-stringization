@@ -197,5 +197,26 @@ int main(int argc, char** argv) {
     parse<parser::grammar>("2017-01-02T03:04:05+05", true);
     parse<parser::grammar>("2017-01-02T03:04:05-06:30", true);
 
+    parse<parser::grammar_generic>("2013-03-05 17:38:26.068865+03", true);
+    parse<parser::grammar_generic>("2013-03-05 17:38:26", true);
+    parse<parser::grammar_generic>("2013-03-05 17:38:26+03", true);
+    parse<parser::grammar_generic>("2013-03-05 17:38:26+03:30", true);
+    parse<parser::grammar_generic>("2013/03/05 17:38:26.068865+03", true);
+
     return 0;
+}
+
+void perf_parse(const char* sample) {
+    datetime dt {0, 0, 0, 0, 0, 0};
+    parser::microsec_t mksec {0};
+    parser::timezone_t tz { parser::tz_info_t::LOCAL, 1, 0, 0 };
+    parser::context_t ctx {dt, mksec, tz, 0, 0, parser::time_unit_t::NONE };
+    const char* end = sample + strlen(sample);
+    parser::grammar_generic::parse(sample, end, ctx);
+};
+
+int zmain() {
+    for (auto i = 0; i < 100000000; ++i) {
+        perf_parse("2013-03-05 17:38:26");
+    }
 }
