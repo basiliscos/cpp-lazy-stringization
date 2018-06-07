@@ -111,7 +111,7 @@ template <typename G>
 void parse(const char* sample, bool expected) {
     datetime dt {0, 0, 0, 0, 0, 0};
     parser::microsec_t mksec {0};
-    parser::timezone_t tz;
+    parser::timezone_t tz { parser::tz_info_t::LOCAL, 1, 0, 0 };
     parser::context_t ctx {dt, mksec, tz, 0, 0, parser::time_unit_t::NONE };
     const char* end = sample + strlen(sample);
     const char* result = G::parse(sample, end, ctx);
@@ -124,12 +124,19 @@ void parse(const char* sample, bool expected) {
     if (!r) {
         std::cout << "failed to parse '" << sample << "'\n";
     } else {
+        bool utc = tz.tz_info != parser::tz_info_t::LOCAL;
         std::cout << "sample '" << sample << "' parsed. "
             << "y = " << dt.year << ", m = " << dt.month << ", d = " << dt.day
-            << "c.week = " << ctx.week << ", c.week_day= " << ctx.week_day
+            << ", c.week = " << ctx.week << ", c.week_day= " << ctx.week_day
             << ", h = " << dt.hour << ", min = " << dt.min << ", sec = " << dt.sec
-            << ", mksec = " << mksec
-            << "\n";
+            << ", mksec = " << mksec;
+        if (utc) {
+            std::cout << ", UTC offset: " << (tz.sign > 0 ? '+' : '-')
+                << tz.hour << ":" << tz.minute;
+        } else {
+            std::cout << ", [localtime]";
+        }
+        std::cout << "\n";
     }
 }
 
@@ -167,10 +174,28 @@ int main(int argc, char** argv) {
     parse<parser::grammar_time>("12.30.5", false);
     parse<parser::grammar_time>("1230.5", true);
     parse<parser::grammar_time>("12:30.5", true);
+    parse<parser::grammar_time>("12:30,5", true);
     parse<parser::grammar_time>("12:30:11.5", true);
     parse<parser::grammar_time>("12:30:11.500000", true);
     parse<parser::grammar_time>("12:30:11.555555", true);
     parse<parser::grammar_time>("12:30:11.5x5555", false);
     parse<parser::grammar_time>("12:30:11.5555555", false);
+
+    parse<parser::grammar_vCard>("--0412", true);
+    parse<parser::grammar_vCard>("---12", true);
+    parse<parser::grammar_vCard>("--xxxx", false);
+    parse<parser::grammar_vCard>("---xx", false);
+
+    parse<parser::grammar_tz>("Z", true);
+    parse<parser::grammar_tz>("+04", true);
+    parse<parser::grammar_tz>("-0317", true);
+    parse<parser::grammar_tz>("+03:17", true);
+
+    parse<parser::grammar>("2017-01-02T03:04:05", true);
+    parse<parser::grammar>("20170828T134935", true);
+    parse<parser::grammar>("20170828T134935Z", true);
+    parse<parser::grammar>("2017-01-02T03:04:05+05", true);
+    parse<parser::grammar>("2017-01-02T03:04:05-06:30", true);
+
     return 0;
 }

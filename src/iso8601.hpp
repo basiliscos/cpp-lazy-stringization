@@ -14,9 +14,16 @@ struct datetime {
 namespace parser {
 
 enum class time_unit_t { NONE = 0, H, M, S};
+enum class tz_info_t { LOCAL, UTC };
 
 using microsec_t = uint32_t;
-struct timezone_t{};
+
+struct timezone_t {
+    tz_info_t tz_info;
+    int sign;
+    uint32_t hour;
+    uint32_t minute;
+};
 
 struct context_t {
     datetime& dt;
@@ -77,6 +84,33 @@ struct handler_second {
     static inline void handle(int value, context_t& ctx) {
         ctx.time_unit = time_unit_t::S;
         ctx.dt.sec = value;
+    }
+};
+
+struct handler_tz_utc {
+    static inline void handle(int value, context_t& ctx) {
+        ctx.tz.tz_info = tz_info_t::UTC;
+    }
+};
+
+struct handler_tz_offset_sign {
+    static inline void handle(int value, context_t& ctx) {
+        ctx.tz.tz_info = tz_info_t::UTC;
+        ctx.tz.sign = (value == '+') ? 1 : -1;
+    }
+};
+
+struct handler_tz_offset_hour {
+    static inline void handle(int value, context_t& ctx) {
+        ctx.tz.tz_info = tz_info_t::UTC;
+        ctx.tz.hour = value;
+    }
+};
+
+struct handler_tz_offset_minute {
+    static inline void handle(int value, context_t& ctx) {
+        ctx.tz.tz_info = tz_info_t::UTC;
+        ctx.tz.minute = value;
     }
 };
 
@@ -144,7 +178,8 @@ template <typename ...Ts> struct op_maybe;
 template <typename T> struct op_maybe<T> {
     static inline const char* parse(const char* ptr, const char* ptr_end, context_t& ctx) {
         if (ptr < ptr_end) {
-            return T::parse(ptr, ptr_end, ctx);
+            const char* ptr_next = T::parse(ptr, ptr_end, ctx);
+            return ptr_next ? ptr_next : ptr;
         }
         return ptr;
     }
@@ -153,8 +188,8 @@ template <typename T, typename ...Ts> struct op_maybe<T, Ts...> {
     static inline const char* parse(const char* ptr, const char* ptr_end, context_t& ctx) {
         if (ptr < ptr_end) {
             const char* ptr_next = T::parse(ptr, ptr_end, ctx);          // direct non-recursive call
-            if (ptr_next == ptr_end) return ptr_end;                     // stop chaining
-            return op_maybe<Ts...>::parse(ptr, ptr_end, ctx);            // continue chaining if 1st op was successfull
+            if (ptr_next >= ptr) return ptr_next;                        // stop chaining
+            return op_maybe<Ts...>::parse(ptr, ptr_end, ctx);            // continue chaining if 1st op was NOT successfull
         }
         return ptr;
     }
@@ -162,14 +197,28 @@ template <typename T, typename ...Ts> struct op_maybe<T, Ts...> {
 
 // terms
 
-template <char T>
+template <char T, typename Handler = void>
 struct term_char {
     static inline const char* parse(const char* ptr, const char* ptr_end, context_t& ctx) {
         if (ptr - ptr_end == 0) return NULL;
-        if (*ptr == T) return ptr+1;
+        if (*ptr == T) {
+            Handler::handle(T, ctx);
+            return ptr + 1;
+        }
         return NULL;
     }
 };
+
+template <char T>
+struct term_char<T, void> {
+    static inline const char* parse(const char* ptr, const char* ptr_end, context_t& ctx) {
+        if (ptr - ptr_end == 0) return NULL;
+        if (*ptr == T) return ptr + 1;
+        return NULL;
+    }
+};
+
+
 
 
 template <int N, typename Handler>
@@ -226,24 +275,39 @@ using term_ordinal_date = term_number<3, handler_ordinal_date>;
 using term_hour         = term_number<2, handler_hour>;
 using term_min          = term_number<2, handler_minute>;
 using term_sec          = term_number<2, handler_second>;
+using term_tz_UTC       = term_char<'Z', handler_tz_utc>;
+using term_hour_tz      = term_number<2, handler_tz_offset_hour>;
+using term_min_tz       = term_number<2, handler_tz_offset_minute>;
 using term_fraction_p   = term_var_number<6, handler_fraction>;
+using term_fraction     = op_seq<op_or<term_char<'.'>, term_char<','>>, term_fraction_p>;
+template<char T> using term_tz_sing = term_char<T, handler_tz_offset_sign>;
+template<typename B> using term_fraq = op_seq<B, term_fraction>;
+
+
 
 using grammar_date = op_seq<
     term_year,                                                                                                      // YYYY
     op_maybe<
         op_or<
             op_seq<term_month, term_day>,                                                                           // YYYYMMDD,
-            op_seq<term_char<'-'>, term_month, op_maybe< op_seq<term_char<'-'>, term_day>>>,                        // YYYY-MM, YYYY-MM-DD
+            op_seq<term_char<'-'>, op_or<
+                term_ordinal_date,                                                                                  // YYYY-DDD
+                op_seq<term_month, op_maybe<op_seq<term_char<'-'>, term_day>>>,                                     // YYYY-MM, YYYY-MM-DD
+                op_seq<term_char<'W'>, term_week, op_maybe<op_seq<term_char<'-'>, term_week_day>>>
+            >>,
             op_seq<term_char<'W'>, term_week, op_maybe< term_week_day>>,                                            // YYYYWww, YYYYWwwD
-            op_seq<term_char<'-'>, term_char<'W'>, term_week, op_maybe< op_seq<term_char<'-'>, term_week_day>>>,    // YYYY-Www, YYYY-Www-D
-            op_seq<term_char<'-'>, term_ordinal_date>,                                                              // YYYY-DDD
             term_ordinal_date                                                                                       // YYYYDDD
         >
     >
 >;
 
-using term_fraction = op_seq<op_or<term_char<'.'>, term_char<','>>, term_fraction_p>;
-template<typename B> using term_fraq = op_seq<B, term_fraction>;
+using grammar_vCard = op_seq<
+    term_char<'-'>, term_char<'-'>,
+    op_or<
+        op_seq<term_month, term_day>,                                           // --MMDD
+        op_seq<term_char<'-'>, term_day>                                        // ---DD
+    >
+>;
 
 using grammar_time = op_seq<
     term_hour,                                                                  // HH
@@ -263,22 +327,33 @@ using grammar_time = op_seq<
     >
 >;
 
+using grammar_tz_offset = op_seq<
+    term_hour_tz,
+    op_maybe<
+        term_min_tz,
+        op_seq<term_char<':'>,  term_min_tz>
+    >
+>;
 
-/*
+using grammar_tz = op_or<
+    term_tz_UTC,                                                                // Z
+    op_seq<
+        op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,                            // ±HH:MM, ±HHMM, ±HH
+        grammar_tz_offset
+    >
+>;
+
+
 using grammar = op_or<
     op_seq<
         grammar_date,
         op_maybe<
             op_seq<
-                grammar_time,
-                op_maybe<1, grammar_tz>
+                term_char<'T'>, grammar_time, op_maybe<grammar_tz>
             >
         >
     >,
     grammar_vCard
 >;
-
-result_t = grammar.parse(char*, &date_time, &mksec, &tz);
-*/
 
 }
