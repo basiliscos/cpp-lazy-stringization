@@ -28,7 +28,7 @@ char* itoa (int64_t i) {
 template <std::size_t N>
 struct tag_t: std::integral_constant<std::size_t, N>{
     inline static char* apply2(char* in, int value) {
-        int i;
+        size_t i;
         auto* buff = itoa(value);
         auto len = strlen(buff);
         for (i = 0; i < 2 - len; i++) *(in++) = '0';
@@ -39,7 +39,7 @@ struct tag_t: std::integral_constant<std::size_t, N>{
 
 struct tag_year     : tag_t<4> {
     inline static char* apply(char* in, datetime& dt) {
-        int i;
+        size_t i;
         auto* buff = itoa(dt.year);
         auto* orig_ptr = in;
         auto len = strlen(buff );
@@ -50,8 +50,8 @@ struct tag_year     : tag_t<4> {
         return orig_ptr;
     }
 };
-struct tag_month    : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.month); }};
-struct tag_day      : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.day); }};
+struct tag_month    : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.mon); }};
+struct tag_day      : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.mday); }};
 struct tag_hour     : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.hour); }};
 struct tag_min      : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.min); }};
 struct tag_sec      : tag_t<2> { inline static char* apply(char* in, datetime& dt) { return apply2(in, dt.sec); }};
@@ -112,7 +112,7 @@ void parse(const char* sample, bool expected) {
     datetime dt {0, 0, 0, 0, 0, 0};
     parser::microsec_t mksec {0};
     parser::timezone_t tz { parser::tz_info_t::LOCAL, 1, 0, 0 };
-    parser::context_t ctx {dt, mksec, tz, 0, 0, parser::time_unit_t::NONE };
+    parser::context_t ctx {dt, mksec, tz, 0, 0, 0, parser::time_unit_t::NONE };
     const char* end = sample + strlen(sample);
     const char* result = G::parse(sample, end, ctx);
     bool r = (result == end);
@@ -126,7 +126,7 @@ void parse(const char* sample, bool expected) {
     } else {
         bool utc = tz.tz_info != parser::tz_info_t::LOCAL;
         std::cout << "sample '" << sample << "' parsed. "
-            << "y = " << dt.year << ", m = " << dt.month << ", d = " << dt.day
+            << "y = " << dt.year << ", m = " << dt.mon << ", d = " << dt.mday
             << ", c.week = " << ctx.week << ", c.week_day= " << ctx.week_day
             << ", h = " << dt.hour << ", min = " << dt.min << ", sec = " << dt.sec
             << ", mksec = " << mksec;
@@ -141,14 +141,13 @@ void parse(const char* sample, bool expected) {
 }
 
 
-int main(int argc, char** argv) {
+int zmain(int argc, char** argv) {
     char buff[iso_t::N] = {0};
     datetime now { 2018, 4, 6, 22, 42, 5};
     char* buff_end = iso_t::apply(buff, now);
     auto sz = buff_end - buff;
     *buff_end = 0;
     std::cout << "result " << sz << "/" << iso_t::N << " bytes :: " << buff << "\n";
-
     parse<parser::grammar_date>("2018", true);
     parse<parser::grammar_date>("20181231", true);
     parse<parser::grammar_date>("2018-12", true);
@@ -191,32 +190,40 @@ int main(int argc, char** argv) {
     parse<parser::grammar_tz>("-0317", true);
     parse<parser::grammar_tz>("+03:17", true);
 
-    parse<parser::grammar>("2017-01-02T03:04:05", true);
-    parse<parser::grammar>("20170828T134935", true);
-    parse<parser::grammar>("20170828T134935Z", true);
-    parse<parser::grammar>("2017-01-02T03:04:05+05", true);
-    parse<parser::grammar>("2017-01-02T03:04:05-06:30", true);
+    parse<parser::grammar_iso8601>("2017-01-02T03:04:05", true);
+    parse<parser::grammar_iso8601>("20170828T134935", true);
+    parse<parser::grammar_iso8601>("20170828T134935Z", true);
+    parse<parser::grammar_iso8601>("2017-01-02T03:04:05+05", true);
+    parse<parser::grammar_iso8601>("2017-01-02T03:04:05-06:30", true);
 
+    parse<parser::grammar_generic>("2013-03", true);
+    parse<parser::grammar_generic>("2013-03-05", true);
     parse<parser::grammar_generic>("2013-03-05 17:38:26.068865+03", true);
     parse<parser::grammar_generic>("2013-03-05 17:38:26", true);
     parse<parser::grammar_generic>("2013-03-05 17:38:26+03", true);
+    parse<parser::grammar_generic>("2013-03-05 3:4:5", true);
     parse<parser::grammar_generic>("2013-03-05 17:38:26+03:30", true);
     parse<parser::grammar_generic>("2013/03/05 17:38:26.068865+03", true);
+    parse<parser::grammar_generic>("+123456789/03/05 17:38:26.068865+03", true);
+    parse<parser::grammar_generic>("-123456789/03/05 17:38:26.068865+03", true);
 
     return 0;
 }
 
+template <typename G>
 void perf_parse(const char* sample) {
     datetime dt {0, 0, 0, 0, 0, 0};
     parser::microsec_t mksec {0};
     parser::timezone_t tz { parser::tz_info_t::LOCAL, 1, 0, 0 };
-    parser::context_t ctx {dt, mksec, tz, 0, 0, parser::time_unit_t::NONE };
+    parser::context_t ctx {dt, mksec, tz, 1, 0, 0, parser::time_unit_t::NONE };
     const char* end = sample + strlen(sample);
     parser::grammar_generic::parse(sample, end, ctx);
 };
 
-int zmain() {
+int main(int argc, char** argv) {
     for (auto i = 0; i < 100000000; ++i) {
-        perf_parse("2013-03-05 17:38:26");
+        perf_parse<parser::grammar_generic>("2013-03-05 17:38:26");
+        //perf_parse<parser::grammar_iso8601>("2017-01-02T03:04:05+05");
     }
+    return 0;
 }

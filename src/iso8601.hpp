@@ -2,9 +2,9 @@
 #include <cmath>
 
 struct datetime {
-    uint32_t year;
-    uint32_t month;
-    uint32_t day;
+    int32_t year;
+    uint32_t mon;
+    uint32_t mday;
     uint32_t hour;
     uint32_t min;
     uint32_t sec;
@@ -29,6 +29,7 @@ struct context_t {
     datetime& dt;
     microsec_t& mksec;
     timezone_t& tz;
+    int32_t year_sign;
     uint32_t week;
     uint32_t week_day;
     time_unit_t time_unit;
@@ -36,21 +37,34 @@ struct context_t {
 
 // handlers
 
+struct handler_year_sign {
+    static inline void handle(int value, context_t& ctx) {
+        ctx.year_sign = (value == '+') ? 1 : -1;
+    }
+};
+
 struct handler_year {
     static inline void handle(int value, context_t& ctx) {
         ctx.dt.year = value;
     }
 };
 
+struct handler_year_v {
+    static inline void handle(int value, int, context_t& ctx) {
+        ctx.dt.year = static_cast<int32_t>(ctx.year_sign * value);
+    }
+};
+
+
 struct handler_month {
     static inline void handle(int value, context_t& ctx) {
-        ctx.dt.month = value;
+        ctx.dt.mon = value;
     }
 };
 
 struct handler_day {
     static inline void handle(int value, context_t& ctx) {
-        ctx.dt.day = value;
+        ctx.dt.mday = value;
     }
 };
 
@@ -73,8 +87,22 @@ struct handler_hour {
     }
 };
 
+struct handler_hour_v {
+    static inline void handle(int value, int, context_t& ctx) {
+        ctx.time_unit = time_unit_t::H;
+        ctx.dt.hour = value;
+    }
+};
+
 struct handler_minute {
     static inline void handle(int value, context_t& ctx) {
+        ctx.time_unit = time_unit_t::M;
+        ctx.dt.min = value;
+    }
+};
+
+struct handler_minute_v {
+    static inline void handle(int value, int, context_t& ctx) {
         ctx.time_unit = time_unit_t::M;
         ctx.dt.min = value;
     }
@@ -87,8 +115,16 @@ struct handler_second {
     }
 };
 
+struct handler_second_v {
+    static inline void handle(int value, int, context_t& ctx) {
+        ctx.time_unit = time_unit_t::S;
+        ctx.dt.sec = value;
+    }
+};
+
+
 struct handler_tz_utc {
-    static inline void handle(int value, context_t& ctx) {
+    static inline void handle(int, context_t& ctx) {
         ctx.tz.tz_info = tz_info_t::UTC;
     }
 };
@@ -171,7 +207,6 @@ template <typename T, typename ...Ts> struct op_seq<T, Ts...> {
     }
 };
 
-
 // maybe
 
 template <typename ...Ts> struct op_maybe;
@@ -211,15 +246,12 @@ struct term_char {
 
 template <char T>
 struct term_char<T, void> {
-    static inline const char* parse(const char* ptr, const char* ptr_end, context_t& ctx) {
+    static inline const char* parse(const char* ptr, const char* ptr_end, context_t&) {
         if (ptr - ptr_end == 0) return NULL;
         if (*ptr == T) return ptr + 1;
         return NULL;
     }
 };
-
-
-
 
 template <int N, typename Handler>
 struct term_number {
@@ -267,20 +299,25 @@ struct term_var_number {
 
 
 using term_year         = term_number<4, handler_year>;
+using term_year_v       = term_var_number<10, handler_year_v>;
 using term_month        = term_number<2, handler_month>;
 using term_day          = term_number<2, handler_day>;
 using term_week         = term_number<2, handler_week>;
 using term_week_day     = term_number<1, handler_week_day>;
 using term_ordinal_date = term_number<3, handler_ordinal_date>;
 using term_hour         = term_number<2, handler_hour>;
+using term_hour_v       = term_var_number<2, handler_hour_v>;
 using term_min          = term_number<2, handler_minute>;
+using term_min_v        = term_var_number<2, handler_minute_v>;
 using term_sec          = term_number<2, handler_second>;
+using term_sec_v        = term_var_number<2, handler_second_v>;
 using term_tz_UTC       = term_char<'Z', handler_tz_utc>;
 using term_hour_tz      = term_number<2, handler_tz_offset_hour>;
 using term_min_tz       = term_number<2, handler_tz_offset_minute>;
 using term_fraction_p   = term_var_number<6, handler_fraction>;
 using term_fraction     = op_seq<op_or<term_char<'.'>, term_char<','>>, term_fraction_p>;
 template<char T> using term_tz_sing = term_char<T, handler_tz_offset_sign>;
+template<char T> using term_year_sign = term_char<T, handler_year_sign>;
 template<typename B> using term_fraq = op_seq<B, term_fraction>;
 
 
@@ -344,7 +381,7 @@ using grammar_tz = op_or<
 >;
 
 
-using grammar = op_or<
+using grammar_iso8601 = op_or<
     op_seq<
         grammar_date,
         op_maybe<
@@ -357,28 +394,33 @@ using grammar = op_or<
 >;
 
 using grammar_generic = op_seq<
-    term_year,
-    op_or<term_char<'-'>, term_char<'/'>>,
-    term_month,
-    op_or<term_char<'-'>, term_char<'/'>>,
-    term_day,                                                                       /// YYYY-MM-DD, YYYY/MM/DD
+    op_maybe<term_year_sign<'+'>, term_year_sign<'-'>>,
+    term_year_v,                                                        // ±Y{1, 10}
     op_maybe<op_seq<
-        term_char<' '>,
-        term_hour,
-        term_char<':'>,
-        term_min,
-        term_char<':'>,
-        term_sec,                                                                   // HH:MM:SS
+        op_or<term_char<'-'>, term_char<'/'>>,
+        term_month,                                                     // YYYY-MM, YYYY/MM
         op_maybe<op_seq<
-            term_fraction,                                                          // .s{1,6}
+            op_or<term_char<'-'>, term_char<'/'>>,
+            term_day,                                                   // YYYY-MM-DD, YYYY/MM/DD
             op_maybe<op_seq<
-                op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,                        // ±HH:MM, ±HHMM, ±HH
-                grammar_tz_offset
+                term_char<' '>,
+                term_hour_v,
+                term_char<':'>,
+                term_min_v,
+                term_char<':'>,
+                term_sec_v,                                             // HH:MM:SS
+                op_maybe<op_seq<
+                    term_fraction,                                      // .s{1,6}
+                    op_maybe<op_seq<
+                        op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,    // ±HH:MM, ±HHMM, ±HH
+                        grammar_tz_offset
+                    >>
+                >>,
+                op_maybe<op_seq<
+                    op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,        // ±HH:MM, ±HHMM, ±HH
+                    grammar_tz_offset
+                >>
             >>
-        >>,
-        op_maybe<op_seq<
-            op_or<term_tz_sing<'+'>, term_tz_sing<'-'>>,                            // ±HH:MM, ±HHMM, ±HH
-            grammar_tz_offset
         >>
     >>
 >;
